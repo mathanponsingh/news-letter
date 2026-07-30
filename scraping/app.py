@@ -1,4 +1,8 @@
+from datetime import datetime, timezone, timedelta
 import os
+import certifi
+from pymongo import MongoClient
+from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
 import time
 from bs4 import BeautifulSoup
 from selenium import webdriver
@@ -9,6 +13,31 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.os_manager import ChromeType
+from dotenv import load_dotenv
+load_dotenv()
+
+
+def get_db_connection():
+    uri = os.getenv("MONGO_URI")
+    db_name = os.getenv("MONGO_DB", "news-letter")
+
+    if not uri:
+        print("❌ MONGO_URI is missing")
+        return None, None
+
+    try:
+        client = MongoClient(
+            uri,
+            serverSelectionTimeoutMS=10000,
+            tlsCAFile=certifi.where()
+        )
+        client.admin.command("ping")
+        print(f"✅ Connected to MongoDB — Database: {db_name}")
+        return client, client[db_name]
+
+    except Exception as e:
+        print(f"❌ MongoDB connection failed: {e}")
+        return None, None
 
 
 def scroll_down(driver, scrolls=4, pause_time=1.5, post_scroll_wait=3.0):
@@ -22,6 +51,11 @@ def scroll_down(driver, scrolls=4, pause_time=1.5, post_scroll_wait=3.0):
 
 def handler(event=None, context=None):
     """Main scraping handler function."""
+    client, db = get_db_connection()
+    if db is not None:
+        print(f"Collections: {db.list_collection_names()}")
+    else:
+        return None
     display = None
     try:
         from pyvirtualdisplay import Display
@@ -88,6 +122,8 @@ def handler(event=None, context=None):
 
         print(f"\n--- Extracted {len(story_cards)} Story Cards ---\n")
 
+        result = []
+
         for index, card in enumerate(story_cards, start=1):
             title_tag = card.find("a", attrs={"data-testid": "TitleLink"}) or card.find("a", href=True)
             if not title_tag or title_tag.get("href", "#") == "#":
@@ -110,12 +146,68 @@ def handler(event=None, context=None):
             desc_tag = card.find("p", attrs={"data-testid": "Description"}) or card.find("p")
             description = desc_tag.text.strip() if desc_tag else "None"
 
+            # Try EagerImage first, fall back to any img in the card
+            img_tag = (
+                card.find("img", {"data-testid": "EagerImage"}) or
+                card.find("img", src=True)
+            )
+            image_url = img_tag.get("src", "") if img_tag else None
+            image_alt = img_tag.get("alt", "") if img_tag else None
+
+
+            result.append({
+                "title": headline,
+                "time": timestamp,
+                "link": link,
+                "description": description,
+                "image_url": image_url,
+                "image_alt": image_alt,
+                "createdAt": datetime.now(timezone.utc)
+            })
+
             print(f"[{index}] {headline}")
             print(f"    Time: {timestamp}")
             print(f"    Link: {link}")
             if description != "None":
                 print(f"    Summary: {description}")
+            if image_url:
+                print(f"    Image URL: {image_url}")
+            if image_alt:
+                print(f"    Image Alt: {image_alt}")
             print("-" * 60)
+        
+        collection = db["reuters_technology"]
+
+        # Delete articles older than 1 day first
+        collection.delete_many({
+            "createdAt": {
+                "$lt": datetime.now(timezone.utc) - timedelta(days=1)
+            }
+        })
+        print(f"✅ Deleted articles older than 1 day")
+
+        if result:
+            # Fetch existing descriptions from the collection
+            existing_descriptions = set(
+                doc["description"]
+                for doc in collection.find(
+                    {"description": {"$exists": True, "$ne": "None"}},
+                    {"description": 1, "_id": 0}
+                )
+            )
+
+            new_articles = [
+                article for article in result
+                if article.get("description", "None") not in existing_descriptions
+                and article.get("description", "None") != "None"
+            ]
+
+            if new_articles:
+                collection.insert_many(new_articles)
+                print(f"✅ Inserted {len(new_articles)} new articles (skipped {len(result) - len(new_articles)} duplicates)")
+            else:
+                print(f"⚠️ No new articles to insert — all {len(result)} already exist in the collection")
+                
 
     finally:
         driver.quit()

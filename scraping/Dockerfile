@@ -3,10 +3,12 @@ FROM python:3.11-slim
 ENV PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive
 
+# Install system dependencies for Selenium, Chromium, and XVFB
 RUN apt-get update && apt-get install -y --no-install-recommends \
     chromium \
     chromium-driver \
     xvfb \
+    ca-certificates \
     fonts-liberation \
     libnss3 \
     libasound2 \
@@ -20,7 +22,11 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Copy application script and entrypoint
 COPY app.py .
+COPY entrypoint.sh .
 
-# Run Python and execute the handler function
-CMD ["python", "-c", "from app import handler; handler()"]
+RUN chmod +x entrypoint.sh
+
+# Run 20-second loop entrypoint script
+ENTRYPOINT ["/app/entrypoint.sh"]
