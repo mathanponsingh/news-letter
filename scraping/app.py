@@ -69,17 +69,19 @@ def handler(event=None, context=None):
     except Exception:
         pass
 
+    import shutil
+
     options = Options()
 
-    # Dynamic binary location lookup (Container /usr/bin vs Host Snap)
-    if os.path.exists("/usr/bin/chromium"):
-        options.binary_location = "/usr/bin/chromium"
-    elif os.path.exists("/usr/bin/chromium-browser"):
-        options.binary_location = "/usr/bin/chromium-browser"
-    elif os.path.exists("/snap/bin/chromium"):
-        options.binary_location = "/snap/bin/chromium"
+    # Dynamic binary location lookup (Container / GitHub Actions / Host)
+    for binary_name in ["google-chrome", "chromium-browser", "chromium"]:
+        binary_path = shutil.which(binary_name)
+        if binary_path and os.path.isfile(binary_path):
+            options.binary_location = binary_path
+            break
 
     # Linux & Docker Chrome options
+    options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
@@ -90,13 +92,14 @@ def handler(event=None, context=None):
     options.add_experimental_option('useAutomationExtension', False)
 
     # Driver service initialization with fallback
-    try:
-        if os.path.exists("/usr/bin/chromedriver"):
-            service = Service("/usr/bin/chromedriver")
-        else:
+    chromedriver_path = shutil.which("chromedriver") or shutil.which("chromium-driver")
+    if chromedriver_path:
+        service = Service(chromedriver_path)
+    else:
+        try:
             service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
-    except Exception:
-        service = Service(ChromeDriverManager().install())
+        except Exception:
+            service = Service(ChromeDriverManager().install())
 
     driver = webdriver.Chrome(service=service, options=options)
 
