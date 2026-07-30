@@ -58,7 +58,6 @@ export function Navbar() {
             >
               <span className="font-serif text-xl sm:text-2xl font-bold tracking-tight text-stone-900 flex items-center gap-1">
                 NewsLetter
-                <span className="w-2 h-2 rounded-full bg-[#3cd9b3] inline-block animate-pulse" title="Live Edition"></span>
               </span>
             </Link>
 
