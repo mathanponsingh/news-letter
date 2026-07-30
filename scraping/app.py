@@ -74,11 +74,13 @@ def handler(event=None, context=None):
     options = Options()
 
     # Dynamic binary location lookup (Container / GitHub Actions / Host)
-    for binary_name in ["google-chrome", "chromium-browser", "chromium"]:
+    for binary_name in ["chromium-browser", "chromium", "google-chrome"]:
         binary_path = shutil.which(binary_name)
-        if binary_path and os.path.isfile(binary_path):
-            options.binary_location = binary_path
-            break
+        if binary_path:
+            real_path = os.path.realpath(binary_path)
+            if os.path.exists(real_path) and os.path.isfile(real_path):
+                options.binary_location = real_path
+                break
 
     # Linux & Docker Chrome options
     options.add_argument("--headless=new")
@@ -93,8 +95,8 @@ def handler(event=None, context=None):
 
     # Driver service initialization with fallback
     chromedriver_path = shutil.which("chromedriver") or shutil.which("chromium-driver")
-    if chromedriver_path:
-        service = Service(chromedriver_path)
+    if chromedriver_path and os.path.exists(os.path.realpath(chromedriver_path)):
+        service = Service(os.path.realpath(chromedriver_path))
     else:
         try:
             service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
