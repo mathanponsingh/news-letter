@@ -152,13 +152,19 @@ def handler(event=None, context=None):
         result = []
 
         for index, card in enumerate(story_cards, start=1):
-            title_tag = card.find("a", attrs={"data-testid": "TitleLink"}) or card.find("a", href=True)
-            if not title_tag or title_tag.get("href", "#") == "#":
+            if card.name == "a":
+                title_tag = card
+            else:
+                title_tag = card.find("a", attrs={"data-testid": "TitleLink"}) or card.find("a", href=True)
+
+            if not title_tag or not title_tag.get("href"):
                 parent = card.parent
                 if parent:
-                    title_tag = parent.find("a", href=True) or title_tag
+                    title_tag = parent if parent.name == "a" else parent.find("a", href=True)
 
             headline = title_tag.text.strip() if title_tag else "N/A"
+            if not headline or headline == "N/A" or len(headline) < 5:
+                continue
 
             link = title_tag.get("href", "") if title_tag else "N/A"
             if link and link.startswith("/"):
@@ -181,27 +187,38 @@ def handler(event=None, context=None):
             image_url = img_tag.get("src", "") if img_tag else None
             image_alt = img_tag.get("alt", "") if img_tag else None
 
-
             result.append({
                 "title": headline,
-                "time": timestamp,
                 "link": link,
+                "time": timestamp,
                 "description": description,
-                "image_url": image_url,
-                "image_alt": image_alt,
+                "image": image_url,
+                "imageAlt": image_alt,
                 "createdAt": datetime.now(timezone.utc)
             })
 
-            print(f"[{index}] {headline}")
-            print(f"    Time: {timestamp}")
-            print(f"    Link: {link}")
-            if description != "None":
-                print(f"    Summary: {description}")
-            if image_url:
-                print(f"    Image URL: {image_url}")
-            if image_alt:
-                print(f"    Image Alt: {image_alt}")
-            print("-" * 60)
+        # Fallback: If result is still empty, extract directly from all article <a> links
+        if not result:
+            print("Notice: Card extraction empty, scanning page for all article links...")
+            seen_links = set()
+            for a in soup.find_all("a", href=True):
+                href = a.get("href", "")
+                text = a.text.strip()
+                if len(text) > 15 and (href.startswith("/technology/") or "/business/" in href or "/world/" in href or "/markets/" in href or "/sustainability/" in href):
+                    full_link = f"https://www.reuters.com{href}" if href.startswith("/") else href
+                    if full_link not in seen_links:
+                        seen_links.add(full_link)
+                        result.append({
+                            "title": text,
+                            "link": full_link,
+                            "time": "Recently",
+                            "description": text,
+                            "image": None,
+                            "imageAlt": None,
+                            "createdAt": datetime.now(timezone.utc)
+                        })
+
+        print(f"\n✅ Total {len(result)} articles prepared for database insertion.\n")
         
         collection = db["reuters_technology"]
 
