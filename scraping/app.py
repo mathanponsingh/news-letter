@@ -26,18 +26,23 @@ def get_db_connection():
         return None, None
 
     try:
-        client = MongoClient(
-            uri,
-            serverSelectionTimeoutMS=10000,
-            tlsCAFile=certifi.where()
-        )
+        client = MongoClient(uri, serverSelectionTimeoutMS=10000)
         client.admin.command("ping")
         print(f"✅ Connected to MongoDB — Database: {db_name}")
         return client, client[db_name]
-
-    except Exception as e:
-        print(f"❌ MongoDB connection failed: {e}")
-        return None, None
+    except Exception:
+        try:
+            client = MongoClient(
+                uri,
+                serverSelectionTimeoutMS=10000,
+                tlsCAFile=certifi.where()
+            )
+            client.admin.command("ping")
+            print(f"✅ Connected to MongoDB — Database: {db_name}")
+            return client, client[db_name]
+        except Exception as e:
+            print(f"❌ MongoDB connection failed: {e}")
+            return None, None
 
 
 def scroll_down(driver, scrolls=4, pause_time=1.5, post_scroll_wait=3.0):
