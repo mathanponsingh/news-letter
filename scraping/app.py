@@ -105,10 +105,20 @@ def handler(event=None, context=None):
 
     driver = webdriver.Chrome(service=service, options=options)
 
-    # Mask navigator.webdriver via CDP script injection
-    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {
-        "source": "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
-    })
+    # Mask navigator.webdriver & apply selenium-stealth to bypass bot detection
+    try:
+        from selenium_stealth import stealth
+        stealth(
+            driver,
+            languages=["en-US", "en"],
+            vendor="Google Inc.",
+            platform="Win32",
+            webgl_vendor="Intel Inc.",
+            renderer="Intel Iris OpenGL Engine",
+            fix_hairline=True,
+        )
+    except Exception as e:
+        print(f"Notice: stealth setup fallback — {e}")
 
     try:
         print("Opening Reuters Technology...")
@@ -122,6 +132,9 @@ def handler(event=None, context=None):
         except Exception as err:
             print(f"Notice: Page wait fallback - {err}")
         time.sleep(3)
+
+        print(f"📄 Page Title: '{driver.title}'")
+        print(f"📄 Page Source Length: {len(driver.page_source)} characters")
 
         # Scroll down to trigger lazy loading for lower grid sections
         print("Scrolling to load lower section story cards...")
@@ -197,26 +210,40 @@ def handler(event=None, context=None):
                 "createdAt": datetime.now(timezone.utc)
             })
 
-        # Fallback: If result is still empty, extract directly from all article <a> links
+        # Fallback 2: If result is still empty, perform a direct HTTP fetch with real browser headers
         if not result:
-            print("Notice: Card extraction empty, scanning page for all article links...")
-            seen_links = set()
-            for a in soup.find_all("a", href=True):
-                href = a.get("href", "")
-                text = a.text.strip()
-                if len(text) > 15 and (href.startswith("/technology/") or "/business/" in href or "/world/" in href or "/markets/" in href or "/sustainability/" in href):
-                    full_link = f"https://www.reuters.com{href}" if href.startswith("/") else href
-                    if full_link not in seen_links:
-                        seen_links.add(full_link)
-                        result.append({
-                            "title": text,
-                            "link": full_link,
-                            "time": "Recently",
-                            "description": text,
-                            "image": None,
-                            "imageAlt": None,
-                            "createdAt": datetime.now(timezone.utc)
-                        })
+            print("Notice: Selenium returned 0 items. Triggering direct HTTP fallback with real browser headers...")
+            import urllib.request
+            try:
+                req = urllib.request.Request(
+                    "https://www.reuters.com/technology/",
+                    headers={
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Accept-Language": "en-US,en;q=0.9",
+                    }
+                )
+                html_data = urllib.request.urlopen(req, timeout=12).read().decode("utf-8")
+                soup_fallback = BeautifulSoup(html_data, "html.parser")
+                seen_links = set()
+                for a in soup_fallback.find_all("a", href=True):
+                    href = a.get("href", "")
+                    text = a.text.strip()
+                    if len(text) > 15 and (href.startswith("/technology/") or "/business/" in href or "/world/" in href or "/markets/" in href or "/sustainability/" in href):
+                        full_link = f"https://www.reuters.com{href}" if href.startswith("/") else href
+                        if full_link not in seen_links:
+                            seen_links.add(full_link)
+                            result.append({
+                                "title": text,
+                                "link": full_link,
+                                "time": "Recently",
+                                "description": text,
+                                "image": None,
+                                "imageAlt": None,
+                                "createdAt": datetime.now(timezone.utc)
+                            })
+            except Exception as http_err:
+                print(f"HTTP fallback notice: {http_err}")
 
         print(f"\n✅ Total {len(result)} articles prepared for database insertion.\n")
         
