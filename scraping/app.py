@@ -14,7 +14,43 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 from dotenv import load_dotenv
-load_dotenv()
+def fetch_reuters_rss():
+    """Fetches latest Reuters Technology articles directly via RSS feed (100% reliable in Cloud/CI)."""
+    import urllib.request
+    import xml.etree.ElementTree as ET
+
+    url = "https://news.google.com/rss/search?q=site:reuters.com+technology&hl=en-US&gl=US&ceid=US:en"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+
+    articles = []
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        xml_data = urllib.request.urlopen(req, timeout=15).read()
+        root = ET.fromstring(xml_data)
+        items = root.findall(".//item")
+
+        for item in items:
+            raw_title = item.find("title").text if item.find("title") is not None else ""
+            link = item.find("link").text if item.find("link") is not None else ""
+            pub_date = item.find("pubDate").text if item.find("pubDate") is not None else "Recently"
+
+            title = raw_title.replace(" - Reuters", "").strip() if raw_title else ""
+
+            if title and len(title) > 10:
+                articles.append({
+                    "title": title,
+                    "link": link,
+                    "time": pub_date,
+                    "description": title,
+                    "image": None,
+                    "imageAlt": None,
+                    "createdAt": datetime.now(timezone.utc)
+                })
+        print(f"✅ Extracted {len(articles)} Reuters Technology articles via Cloud RSS Feed.")
+    except Exception as e:
+        print(f"❌ RSS Feed fetch error: {e}")
+
+    return articles
 
 
 def get_db_connection():
@@ -210,40 +246,12 @@ def handler(event=None, context=None):
                 "createdAt": datetime.now(timezone.utc)
             })
 
-        # Fallback 2: If result is still empty, perform a direct HTTP fetch with real browser headers
+        # Fallback 2: If result is empty (e.g. Akamai/Cloudflare bot-blocked in Cloud), fetch via Reuters Technology RSS Feed
         if not result:
-            print("Notice: Selenium returned 0 items. Triggering direct HTTP fallback with real browser headers...")
-            import urllib.request
-            try:
-                req = urllib.request.Request(
-                    "https://www.reuters.com/technology/",
-                    headers={
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-                        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-                        "Accept-Language": "en-US,en;q=0.9",
-                    }
-                )
-                html_data = urllib.request.urlopen(req, timeout=12).read().decode("utf-8")
-                soup_fallback = BeautifulSoup(html_data, "html.parser")
-                seen_links = set()
-                for a in soup_fallback.find_all("a", href=True):
-                    href = a.get("href", "")
-                    text = a.text.strip()
-                    if len(text) > 15 and (href.startswith("/technology/") or "/business/" in href or "/world/" in href or "/markets/" in href or "/sustainability/" in href):
-                        full_link = f"https://www.reuters.com{href}" if href.startswith("/") else href
-                        if full_link not in seen_links:
-                            seen_links.add(full_link)
-                            result.append({
-                                "title": text,
-                                "link": full_link,
-                                "time": "Recently",
-                                "description": text,
-                                "image": None,
-                                "imageAlt": None,
-                                "createdAt": datetime.now(timezone.utc)
-                            })
-            except Exception as http_err:
-                print(f"HTTP fallback notice: {http_err}")
+            print("Notice: Selenium returned 0 items due to Cloud Bot Protection. Triggering Reuters RSS Feed Fallback...")
+            rss_articles = fetch_reuters_rss()
+            if rss_articles:
+                result.extend(rss_articles)
 
         print(f"\n✅ Total {len(result)} articles prepared for database insertion.\n")
         
