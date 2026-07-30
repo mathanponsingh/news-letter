@@ -15,14 +15,17 @@ from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 from dotenv import load_dotenv
 def fetch_reuters_rss():
-    """Fetches latest Reuters Technology articles directly via RSS feed (100% reliable in Cloud/CI)."""
+    """Fetches latest Reuters Technology articles published strictly within Yesterday & Today (last 24 hours)."""
     import urllib.request
     import xml.etree.ElementTree as ET
+    from email.utils import parsedate_to_datetime
 
     url = "https://news.google.com/rss/search?q=site:reuters.com+technology&hl=en-US&gl=US&ceid=US:en"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
     articles = []
+    cutoff_time = datetime.now(timezone.utc) - timedelta(days=1)
+
     try:
         req = urllib.request.Request(url, headers=headers)
         xml_data = urllib.request.urlopen(req, timeout=15).read()
@@ -32,7 +35,18 @@ def fetch_reuters_rss():
         for item in items:
             raw_title = item.find("title").text if item.find("title") is not None else ""
             link = item.find("link").text if item.find("link") is not None else ""
-            pub_date = item.find("pubDate").text if item.find("pubDate") is not None else "Recently"
+            pub_date_str = item.find("pubDate").text if item.find("pubDate") is not None else ""
+
+            dt_pub = None
+            if pub_date_str:
+                try:
+                    dt_pub = parsedate_to_datetime(pub_date_str)
+                except Exception:
+                    dt_pub = None
+
+            # Skip older articles (only keep Yesterday & Today)
+            if dt_pub and dt_pub < cutoff_time:
+                continue
 
             title = raw_title.replace(" - Reuters", "").strip() if raw_title else ""
 
@@ -40,13 +54,13 @@ def fetch_reuters_rss():
                 articles.append({
                     "title": title,
                     "link": link,
-                    "time": pub_date,
+                    "time": pub_date_str or "Recently",
                     "description": title,
                     "image": None,
                     "imageAlt": None,
-                    "createdAt": datetime.now(timezone.utc)
+                    "createdAt": dt_pub or datetime.now(timezone.utc)
                 })
-        print(f"✅ Extracted {len(articles)} Reuters Technology articles via Cloud RSS Feed.")
+        print(f"✅ Extracted {len(articles)} fresh Reuters Technology articles (Yesterday & Today only).")
     except Exception as e:
         print(f"❌ RSS Feed fetch error: {e}")
 
