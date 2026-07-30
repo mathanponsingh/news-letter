@@ -129,10 +129,23 @@ def handler(event=None, context=None):
 
         soup = BeautifulSoup(driver.page_source, "html.parser")
 
-        # Match top-hero cards, lower single-section block cards, and feed list items
+        # Multi-layered story card matching for all Reuters layout variants
         story_cards = soup.find_all(
-            attrs={"data-testid": lambda v: v in ["StoryCard", "common/single-section-blockStoryCard", "FeedListItem"]}
+            attrs={"data-testid": lambda v: v and any(k in str(v) for k in ["StoryCard", "single-section-block", "FeedListItem", "MediaStoryCard", "Story"])}
         )
+
+        if not story_cards:
+            story_cards = soup.find_all("article")
+
+        if not story_cards:
+            story_cards = soup.find_all("a", attrs={"data-testid": lambda v: v and ("Title" in str(v) or "Heading" in str(v) or "Link" in str(v))})
+
+        if not story_cards:
+            # Match any link container pointing to Reuters article paths
+            story_cards = [
+                a.parent for a in soup.find_all("a", href=True) 
+                if a.get("href", "").startswith("/technology/") or "/business/" in a.get("href", "") or "/world/" in a.get("href", "")
+            ]
 
         print(f"\n--- Extracted {len(story_cards)} Story Cards ---\n")
 
