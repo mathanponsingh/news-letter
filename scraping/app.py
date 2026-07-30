@@ -114,10 +114,14 @@ def handler(event=None, context=None):
         print("Opening Reuters Technology...")
         driver.get("https://www.reuters.com/technology/")
 
-        # Wait until the main content block loads
-        WebDriverWait(driver, 30).until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "main[data-testid='SlicesLayout']"))
-        )
+        # Wait until page body loads with graceful fallback
+        try:
+            WebDriverWait(driver, 15).until(
+                EC.presence_of_element_located((By.TAG_NAME, "body"))
+            )
+        except Exception as err:
+            print(f"Notice: Page wait fallback - {err}")
+        time.sleep(3)
 
         # Scroll down to trigger lazy loading for lower grid sections
         print("Scrolling to load lower section story cards...")
