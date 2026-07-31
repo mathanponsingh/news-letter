@@ -295,9 +295,18 @@ def fetch_reuters_direct():
             }
 
         with ThreadPoolExecutor(max_workers=10) as executor:
-            articles = [r for r in executor.map(process_card, story_cards) if r is not None]
+            raw_articles = [r for r in executor.map(process_card, story_cards) if r is not None]
 
-        return articles
+        # Filter out duplicate headlines/links from main page layout
+        seen_keys = set()
+        unique_articles = []
+        for art in raw_articles:
+            key = (art["title"].strip().lower(), art["link"])
+            if key not in seen_keys:
+                seen_keys.add(key)
+                unique_articles.append(art)
+
+        return unique_articles
     except Exception as e:
         print(f"Notice: Direct scraping fallback - {e}")
         return []
@@ -334,7 +343,7 @@ def handler(event=None, context=None):
     print(f"✅ Deleted articles older than 1 day")
 
     if result:
-        # Deduplicate based on link or title
+        # Deduplicate based on link or title against existing DB documents
         existing_links = set(
             doc["link"]
             for doc in collection.find(
@@ -342,10 +351,18 @@ def handler(event=None, context=None):
                 {"link": 1, "_id": 0}
             )
         )
+        existing_titles = set(
+            doc["title"].strip().lower()
+            for doc in collection.find(
+                {"title": {"$exists": True}},
+                {"title": 1, "_id": 0}
+            )
+        )
 
         new_articles = [
             article for article in result
             if article.get("link") not in existing_links
+            and article.get("title", "").strip().lower() not in existing_titles
         ]
 
         if new_articles:
