@@ -285,7 +285,7 @@ def fetch_reuters_direct():
                 title_hash = hashlib.md5(headline.encode("utf-8")).hexdigest()[:8]
                 image_url = f"https://picsum.photos/seed/{title_hash}/800/450"
 
-            print(image_url)
+            print(headline+"\n"+image_url+"\n")
             return {
                 "title": headline,
                 "link": link,
