@@ -76,7 +76,10 @@ def extract_rss_image_url(item, link, title):
         except Exception:
             pass
 
-    return ""
+    # 3. Deterministic fallback per article title
+    import hashlib
+    title_hash = hashlib.md5(title.encode("utf-8")).hexdigest()[:8]
+    return f"https://picsum.photos/seed/{title_hash}/800/450"
 
 
 def fetch_reuters_rss():
@@ -261,19 +264,28 @@ def fetch_reuters_direct():
                         image_url = candidates[-1]
 
             # If image URL missing on index page, fetch from article page og:image
-            if not image_url and link and link.startswith("https://www.reuters.com"):
+            if (not image_url or not image_url.strip()) and link and link.startswith("https://www.reuters.com"):
                 try:
-                    art_resp = cffi_requests.get(link, impersonate="chrome", timeout=5)
+                    art_resp = cffi_requests.get(link, impersonate="chrome", timeout=10)
                     if art_resp.status_code == 200:
                         art_soup = BeautifulSoup(art_resp.text, "html.parser")
                         meta_img = (
                             art_soup.find("meta", property="og:image") or
-                            art_soup.find("meta", name="twitter:image")
+                            art_soup.find("meta", name="twitter:image") or
+                            art_soup.find("meta", attrs={"name": "og:image"})
                         )
                         if meta_img and meta_img.get("content"):
                             image_url = meta_img.get("content")
                 except Exception:
                     pass
+
+            # Guarantee that image_url is NEVER empty string or None
+            if not image_url or not image_url.strip():
+                import hashlib
+                title_hash = hashlib.md5(headline.encode("utf-8")).hexdigest()[:8]
+                image_url = f"https://picsum.photos/seed/{title_hash}/800/450"
+
+            print(image_url)
             return {
                 "title": headline,
                 "link": link,
