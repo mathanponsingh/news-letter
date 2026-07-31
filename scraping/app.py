@@ -44,12 +44,11 @@ def extract_rss_image_url(item, link, title):
         img = soup.find("img")
         if img and img.get("src"):
             return img.get("src")
-
-    # 2. Fetch real article page elements using curl_cffi (bypasses DataDome / Cloudflare)
-    if link and "reuters.com" in link:
+    # 2. Scrape article page directly via curl_cffi for real image
+    if link and link.startswith("https://www.reuters.com"):
         try:
             from curl_cffi import requests as cffi_requests
-            r = cffi_requests.get(link, impersonate="chrome", timeout=6)
+            r = cffi_requests.get(link, impersonate="chrome", timeout=10)
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, "html.parser")
                 meta_img = (
@@ -76,10 +75,8 @@ def extract_rss_image_url(item, link, title):
         except Exception:
             pass
 
-    # 3. Deterministic fallback per article title
-    import hashlib
-    title_hash = hashlib.md5(title.encode("utf-8")).hexdigest()[:8]
-    return f"https://picsum.photos/seed/{title_hash}/800/450"
+    # 3. Real News Image fallback via Google News search (for Cloud IPs / GitHub Actions)
+    return get_google_news_fallback_image(title)
 
 
 def fetch_reuters_rss():
@@ -279,11 +276,9 @@ def fetch_reuters_direct():
                 except Exception:
                     pass
 
-            # Guarantee that image_url is NEVER empty string or None
+            # Guarantee that image_url is NEVER empty string or None by using real news thumbnail search fallback
             if not image_url or not image_url.strip():
-                import hashlib
-                title_hash = hashlib.md5(headline.encode("utf-8")).hexdigest()[:8]
-                image_url = f"https://picsum.photos/seed/{title_hash}/800/450"
+                image_url = get_google_news_fallback_image(headline)
 
             print(headline+"\n"+image_url+"\n")
             return {
