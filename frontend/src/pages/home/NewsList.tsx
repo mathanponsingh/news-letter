@@ -1,15 +1,14 @@
-import { dummyNewsData, type NewsItem } from "../../data/dummyData";
+import type { NewsItem } from "../../types";
 import { ArrowUpRightIcon, ClockIcon, NewspaperIcon } from "@heroicons/react/24/outline";
+import { useNews } from "../../hooks/useNews";
 
-// Fallback high-resolution images for items without image URL
-const FALLBACK_IMAGES = [
-  "https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1200&q=80",
-  "https://images.unsplash.com/photo-1585829365295-ab7cd400c167?auto=format&fit=crop&w=1200&q=80",
-  "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1200&q=80",
-  "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=1200&q=80"
-];
+interface NewsListProps {
+  newsData?: NewsItem[];
+}
 
-export function NewsList() {
+export function NewsList({ newsData: propNewsData }: NewsListProps = {}) {
+  const { newsData: fetchedNews } = useNews('/technology');
+  const newsData = propNewsData ?? fetchedNews;
   return (
     <section className="w-full lg:w-[90%] bg-white py-16 px-4 sm:px-6 lg:px-8 mx-auto font-sans">
       
@@ -32,8 +31,8 @@ export function NewsList() {
       {/* 2 News Per Row Grid Layout with FIXED Box Dimensions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
         
-        {dummyNewsData.map((item: NewsItem, index: number) => {
-          const itemImage = item.image || FALLBACK_IMAGES[index % FALLBACK_IMAGES.length];
+        {newsData.map((item: NewsItem) => {
+          const itemImage = !item.image ? "/default.jpg" : item.image;
 
           return (
             <a href={item.link} key={item.id} target="_blank">
