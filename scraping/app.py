@@ -14,16 +14,85 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 from dotenv import load_dotenv
+load_dotenv()
+def extract_rss_image_url(item, link, title):
+    """Extracts image URL from RSS XML elements (media, enclosure, description) or fetches real article HTML element images via curl_cffi."""
+    # 1. Check XML elements for media/enclosure/description image tags
+    media_tags = [
+        ".//{http://search.yahoo.com/mrss/}content",
+        ".//{http://search.yahoo.com/mrss/}thumbnail",
+        ".//{http://video.search.yahoo.com/mrss}content",
+        ".//enclosure"
+    ]
+    for tag in media_tags:
+        elem = item.find(tag)
+        if elem is not None and elem.attrib.get("url"):
+            url = elem.attrib.get("url")
+            elem_type = elem.attrib.get("type", "").lower()
+            if not elem_type or "image" in elem_type or any(url.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"]):
+                return url
+
+    # Check description or content HTML for <img> tag
+    desc = item.find("description")
+    desc_text = desc.text if desc is not None and desc.text else ""
+    content_encoded = item.find(".//{http://purl.org/rss/1.0/modules/content/}encoded")
+    if content_encoded is not None and content_encoded.text:
+        desc_text += " " + content_encoded.text
+
+    if desc_text:
+        soup = BeautifulSoup(desc_text, "html.parser")
+        img = soup.find("img")
+        if img and img.get("src"):
+            return img.get("src")
+
+    # 2. Fetch real article page elements using curl_cffi (bypasses DataDome / Cloudflare)
+    if link and "reuters.com" in link:
+        try:
+            from curl_cffi import requests as cffi_requests
+            r = cffi_requests.get(link, impersonate="chrome", timeout=6)
+            if r.status_code == 200:
+                soup = BeautifulSoup(r.text, "html.parser")
+                meta_img = (
+                    soup.find("meta", property="og:image") or
+                    soup.find("meta", name="twitter:image") or
+                    soup.find("meta", attrs={"name": "og:image"})
+                )
+                if meta_img and meta_img.get("content"):
+                    return meta_img.get("content")
+
+                img_tag = (
+                    soup.find("img", {"data-testid": "EagerImage"}) or
+                    soup.find("img", src=True) or
+                    soup.find("img", srcset=True)
+                )
+                if img_tag:
+                    src_url = img_tag.get("src")
+                    if not src_url and img_tag.get("srcset"):
+                        candidates = [item.strip().split(" ")[0] for item in img_tag["srcset"].split(",") if item.strip()]
+                        if candidates:
+                            src_url = candidates[-1]
+                    if src_url:
+                        return src_url
+        except Exception:
+            pass
+
+    return ""
+
+
 def fetch_reuters_rss():
-    """Fetches latest Reuters Technology articles published strictly within Yesterday & Today (last 24 hours)."""
+    """Fetches latest Reuters Technology articles published strictly within Yesterday & Today (last 24 hours), including decoded links and unique image URLs."""
     import urllib.request
     import xml.etree.ElementTree as ET
     from email.utils import parsedate_to_datetime
+    from concurrent.futures import ThreadPoolExecutor
+    try:
+        from googlenewsdecoder import new_decoderv1
+    except ImportError:
+        new_decoderv1 = None
 
     url = "https://news.google.com/rss/search?q=site:reuters.com+technology&hl=en-US&gl=US&ceid=US:en"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
-    articles = []
     cutoff_time = datetime.now(timezone.utc) - timedelta(days=1)
 
     try:
@@ -32,6 +101,7 @@ def fetch_reuters_rss():
         root = ET.fromstring(xml_data)
         items = root.findall(".//item")
 
+        filtered_items = []
         for item in items:
             raw_title = item.find("title").text if item.find("title") is not None else ""
             link = item.find("link").text if item.find("link") is not None else ""
@@ -51,20 +121,43 @@ def fetch_reuters_rss():
             title = raw_title.replace(" - Reuters", "").strip() if raw_title else ""
 
             if title and len(title) > 10:
-                articles.append({
-                    "title": title,
-                    "link": link,
-                    "time": pub_date_str or "Recently",
-                    "description": title,
-                    "image": None,
-                    "imageAlt": None,
-                    "createdAt": dt_pub or datetime.now(timezone.utc)
-                })
-        print(f"✅ Extracted {len(articles)} fresh Reuters Technology articles (Yesterday & Today only).")
+                filtered_items.append((item, title, link, pub_date_str, dt_pub))
+
+        def process_entry(entry):
+            item, title, raw_link, pub_date_str, dt_pub = entry
+            
+            # Decode Google News RSS link to actual Reuters article link
+            final_link = raw_link
+            if new_decoderv1 and "news.google.com" in raw_link:
+                try:
+                    res = new_decoderv1(raw_link)
+                    if res and res.get("status") and res.get("decoded_url"):
+                        final_link = res.get("decoded_url")
+                except Exception:
+                    final_link = raw_link
+
+            image_url = extract_rss_image_url(item, final_link, title)
+            print(image_url)
+
+            return {
+                "title": title,
+                "link": final_link,
+                "time": pub_date_str or "Recently",
+                "description": title,
+                "image": image_url,
+                "imageAlt": title,
+                "createdAt": dt_pub or datetime.now(timezone.utc)
+            }
+
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            articles = list(executor.map(process_entry, filtered_items))
+
+        print(f"✅ Extracted {len(articles)} fresh Reuters Technology articles with decoded links and unique images.")
+        return articles
     except Exception as e:
         print(f"❌ RSS Feed fetch error: {e}")
 
-    return articles
+    return []
 
 
 def get_db_connection():
@@ -104,117 +197,28 @@ def scroll_down(driver, scrolls=4, pause_time=1.5, post_scroll_wait=3.0):
     time.sleep(post_scroll_wait)
 
 
-def handler(event=None, context=None):
-    """Main scraping handler function."""
-    client, db = get_db_connection()
-    if db is not None:
-        print(f"Collections: {db.list_collection_names()}")
-    else:
-        return None
-    display = None
+def fetch_reuters_direct():
+    """Fetches articles directly from https://www.reuters.com/technology/ using curl_cffi to bypass DataDome bot detection."""
     try:
-        from pyvirtualdisplay import Display
-        display = Display(backend="xvfb", visible=0, size=(1920, 1080))
-        display.start()
-    except Exception:
-        pass
+        from curl_cffi import requests as cffi_requests
+        from concurrent.futures import ThreadPoolExecutor
+        
+        url = "https://www.reuters.com/technology/"
+        r = cffi_requests.get(url, impersonate="chrome", timeout=10)
+        if r.status_code != 200 or len(r.text) < 5000:
+            return []
 
-    import shutil
-
-    options = Options()
-
-    # Dynamic binary location lookup (Container / GitHub Actions / Host)
-    for binary_name in ["chromium-browser", "chromium", "google-chrome"]:
-        binary_path = shutil.which(binary_name)
-        if binary_path:
-            real_path = os.path.realpath(binary_path)
-            if os.path.exists(real_path) and os.path.isfile(real_path):
-                options.binary_location = real_path
-                break
-
-    # Linux & Docker Chrome options
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    options.add_argument("--disable-blink-features=AutomationControlled")
-    options.add_argument("--window-size=1920,1080")
-    options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-    options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    options.add_experimental_option('useAutomationExtension', False)
-
-    # Driver service initialization with fallback
-    chromedriver_path = shutil.which("chromedriver") or shutil.which("chromium-driver")
-    if chromedriver_path and os.path.exists(os.path.realpath(chromedriver_path)):
-        service = Service(os.path.realpath(chromedriver_path))
-    else:
-        try:
-            service = Service(ChromeDriverManager(chrome_type=ChromeType.CHROMIUM).install())
-        except Exception:
-            service = Service(ChromeDriverManager().install())
-
-    driver = webdriver.Chrome(service=service, options=options)
-
-    # Mask navigator.webdriver & apply selenium-stealth to bypass bot detection
-    try:
-        from selenium_stealth import stealth
-        stealth(
-            driver,
-            languages=["en-US", "en"],
-            vendor="Google Inc.",
-            platform="Win32",
-            webgl_vendor="Intel Inc.",
-            renderer="Intel Iris OpenGL Engine",
-            fix_hairline=True,
-        )
-    except Exception as e:
-        print(f"Notice: stealth setup fallback — {e}")
-
-    try:
-        print("Opening Reuters Technology...")
-        driver.get("https://www.reuters.com/technology/")
-
-        # Wait until page body loads with graceful fallback
-        try:
-            WebDriverWait(driver, 15).until(
-                EC.presence_of_element_located((By.TAG_NAME, "body"))
-            )
-        except Exception as err:
-            print(f"Notice: Page wait fallback - {err}")
-        time.sleep(3)
-
-        print(f"📄 Page Title: '{driver.title}'")
-        print(f"📄 Page Source Length: {len(driver.page_source)} characters")
-
-        # Scroll down to trigger lazy loading for lower grid sections
-        print("Scrolling to load lower section story cards...")
-        scroll_down(driver, scrolls=4, pause_time=1.5, post_scroll_wait=3.0)
-
-        soup = BeautifulSoup(driver.page_source, "html.parser")
-
-        # Multi-layered story card matching for all Reuters layout variants
+        soup = BeautifulSoup(r.text, "html.parser")
         story_cards = soup.find_all(
             attrs={"data-testid": lambda v: v and any(k in str(v) for k in ["StoryCard", "single-section-block", "FeedListItem", "MediaStoryCard", "Story"])}
         )
-
         if not story_cards:
             story_cards = soup.find_all("article")
 
         if not story_cards:
-            story_cards = soup.find_all("a", attrs={"data-testid": lambda v: v and ("Title" in str(v) or "Heading" in str(v) or "Link" in str(v))})
+            return []
 
-        if not story_cards:
-            # Match any link container pointing to Reuters article paths
-            story_cards = [
-                a.parent for a in soup.find_all("a", href=True) 
-                if a.get("href", "").startswith("/technology/") or "/business/" in a.get("href", "") or "/world/" in a.get("href", "")
-            ]
-
-        print(f"\n--- Extracted {len(story_cards)} Story Cards ---\n")
-
-        result = []
-
-        for index, card in enumerate(story_cards, start=1):
+        def process_card(card):
             if card.name == "a":
                 title_tag = card
             else:
@@ -227,7 +231,7 @@ def handler(event=None, context=None):
 
             headline = title_tag.text.strip() if title_tag else "N/A"
             if not headline or headline == "N/A" or len(headline) < 5:
-                continue
+                return None
 
             link = title_tag.get("href", "") if title_tag else "N/A"
             if link and link.startswith("/"):
@@ -242,70 +246,103 @@ def handler(event=None, context=None):
             desc_tag = card.find("p", attrs={"data-testid": "Description"}) or card.find("p")
             description = desc_tag.text.strip() if desc_tag else "None"
 
-            # Try EagerImage first, fall back to any img in the card
             img_tag = (
                 card.find("img", {"data-testid": "EagerImage"}) or
-                card.find("img", src=True)
+                card.find("img", src=True) or
+                card.find("img", srcset=True) or
+                card.find("img")
             )
-            image_url = img_tag.get("src", "") if img_tag else None
-            image_alt = img_tag.get("alt", "") if img_tag else None
+            image_url = None
+            if img_tag:
+                image_url = img_tag.get("src")
+                if not image_url and img_tag.get("srcset"):
+                    candidates = [item.strip().split(" ")[0] for item in img_tag["srcset"].split(",") if item.strip()]
+                    if candidates:
+                        image_url = candidates[-1]
 
-            result.append({
+            # If image URL missing on index page, fetch from article page og:image
+            if not image_url and link and link.startswith("https://www.reuters.com"):
+                try:
+                    art_resp = cffi_requests.get(link, impersonate="chrome", timeout=5)
+                    if art_resp.status_code == 200:
+                        art_soup = BeautifulSoup(art_resp.text, "html.parser")
+                        meta_img = (
+                            art_soup.find("meta", property="og:image") or
+                            art_soup.find("meta", name="twitter:image")
+                        )
+                        if meta_img and meta_img.get("content"):
+                            image_url = meta_img.get("content")
+                except Exception:
+                    pass
+            return {
                 "title": headline,
                 "link": link,
                 "time": timestamp,
                 "description": description,
                 "image": image_url,
-                "imageAlt": image_alt,
+                "imageAlt": headline,
                 "createdAt": datetime.now(timezone.utc)
-            })
-
-        # Fallback 2: If result is empty (e.g. Akamai/Cloudflare bot-blocked in Cloud), fetch via Reuters Technology RSS Feed
-        if not result:
-            print("Notice: Selenium returned 0 items due to Cloud Bot Protection. Triggering Reuters RSS Feed Fallback...")
-            rss_articles = fetch_reuters_rss()
-            if rss_articles:
-                result.extend(rss_articles)
-
-        print(f"\n✅ Total {len(result)} articles prepared for database insertion.\n")
-        
-        collection = db["reuters_technology"]
-
-        # Delete articles older than 1 day first
-        collection.delete_many({
-            "createdAt": {
-                "$lt": datetime.now(timezone.utc) - timedelta(days=1)
             }
-        })
-        print(f"✅ Deleted articles older than 1 day")
 
-        if result:
-            # Fetch existing descriptions from the collection
-            existing_descriptions = set(
-                doc["description"]
-                for doc in collection.find(
-                    {"description": {"$exists": True, "$ne": "None"}},
-                    {"description": 1, "_id": 0}
-                )
+        with ThreadPoolExecutor(max_workers=10) as executor:
+            articles = [r for r in executor.map(process_card, story_cards) if r is not None]
+
+        return articles
+    except Exception as e:
+        print(f"Notice: Direct scraping fallback - {e}")
+        return []
+
+
+def handler(event=None, context=None):
+    """Main scraping handler function."""
+    client, db = get_db_connection()
+    if db is not None:
+        print(f"Collections: {db.list_collection_names()}")
+    else:
+        return None
+
+    # Step 1: Try direct scraping reuters.com/technology via curl_cffi (Fast & Bypasses DataDome)
+    print("Fetching live articles directly from reuters.com/technology/...")
+    result = fetch_reuters_direct()
+
+    if result:
+        print(f"✅ Extracted {len(result)} live articles directly from reuters.com/technology/")
+    else:
+        print("Notice: Direct scraping returned 0 items. Triggering Reuters RSS Feed Fallback...")
+        result = fetch_reuters_rss()
+
+    print(f"\n✅ Total {len(result)} articles prepared for database insertion.\n")
+    
+    collection = db["reuters_technology"]
+
+    # Delete articles older than 1 day first
+    collection.delete_many({
+        "createdAt": {
+            "$lt": datetime.now(timezone.utc) - timedelta(days=1)
+        }
+    })
+    print(f"✅ Deleted articles older than 1 day")
+
+    if result:
+        # Deduplicate based on link or title
+        existing_links = set(
+            doc["link"]
+            for doc in collection.find(
+                {"link": {"$exists": True}},
+                {"link": 1, "_id": 0}
             )
+        )
 
-            new_articles = [
-                article for article in result
-                if article.get("description", "None") not in existing_descriptions
-                and article.get("description", "None") != "None"
-            ]
+        new_articles = [
+            article for article in result
+            if article.get("link") not in existing_links
+        ]
 
-            if new_articles:
-                collection.insert_many(new_articles)
-                print(f"✅ Inserted {len(new_articles)} new articles (skipped {len(result) - len(new_articles)} duplicates)")
-            else:
-                print(f"⚠️ No new articles to insert — all {len(result)} already exist in the collection")
-                
-
-    finally:
-        driver.quit()
-        if display:
-            display.stop()
+        if new_articles:
+            collection.insert_many(new_articles)
+            print(f"✅ Inserted {len(new_articles)} new articles (skipped {len(result) - len(new_articles)} duplicates)")
+        else:
+            print(f"⚠️ No new articles to insert — all {len(result)} already exist in the collection")
 
 
 if __name__ == "__main__":

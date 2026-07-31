@@ -7,3 +7,5 @@ selenium-stealth
 pymongo
 dnspython
 certifi
+curl_cffi
+googlenewsdecoder
