@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { EnvelopeIcon, LockClosedIcon, ArrowRightIcon } from "@heroicons/react/24/outline";
+import { signIn } from "../../lib/auth-client";
 
 export function Login() {
   const [email, setEmail] = useState("");
@@ -9,14 +10,23 @@ export function Login() {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    // Simulate login delay
-    setTimeout(() => {
-      setIsLoading(false);
-      navigate("/");
-    }, 800);
+    
+    const {data, error} = await signIn.email({
+      email: email,
+      password: password,
+    })
+    if(error){
+      console.error('login error', error);
+    }
+    if(data){
+      console.log("Login success", data)
+      navigate("/")
+    }
+    setIsLoading(false);
+    
   };
 
   return (

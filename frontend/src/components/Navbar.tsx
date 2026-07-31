@@ -4,12 +4,20 @@ import {
   Bars3Icon, 
   XMarkIcon, 
   MagnifyingGlassIcon,
-  EnvelopeIcon 
+  EnvelopeIcon,
+  UserIcon,
+  ChevronDownIcon,
+  BookmarkIcon,
+  Cog6ToothIcon,
+  ArrowRightEndOnRectangleIcon
 } from "@heroicons/react/24/outline";
+import { useSession, signOut } from "../lib/auth-client";
 
 export function Navbar() {
+  const { data: session } = useSession();
   const [isScrolled, setIsScrolled] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const location = useLocation();
@@ -27,10 +35,16 @@ export function Navbar() {
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Close mobile menu on route change
+  // Close mobile menu and user menu on route change
   useEffect(() => {
     setMobileMenuOpen(false);
+    setUserMenuOpen(false);
   }, [location]);
+
+  const handleSignOut = async () => {
+    await signOut();
+    setUserMenuOpen(false);
+  };
 
   const navLinks = [
     { name: "Latest Issues", href: "/" },
@@ -117,22 +131,101 @@ export function Navbar() {
               )}
             </div>
 
-            {/* Secondary CTA: Log in */}
-            <Link
-              to="/auth/login"
-              className="hidden sm:inline-flex items-center px-4 py-2 text-sm font-medium text-stone-900 bg-transparent border border-stone-300 hover:border-stone-900 rounded-full transition-all duration-200 hover:bg-stone-50"
-            >
-              Sign In
-            </Link>
+            {/* Profile Dropdown or Sign In / Subscribe */}
+            {session?.user ? (
+              <div className="relative">
+                <button
+                  onClick={() => setUserMenuOpen(!userMenuOpen)}
+                  className="flex items-center gap-2 p-1 pl-3 pr-2 text-stone-800 hover:text-stone-900 bg-stone-100/90 hover:bg-stone-200/80 border border-stone-200/90 rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-stone-900/20"
+                  aria-expanded={userMenuOpen}
+                >
+                  <div className="w-7 h-7 rounded-full bg-stone-900 text-white font-medium text-xs flex items-center justify-center uppercase shadow-xs">
+                    {session.user.name ? session.user.name.charAt(0) : "U"}
+                  </div>
+                  <span className="text-sm font-medium max-w-[120px] truncate">
+                    {session.user.name || "Account"}
+                  </span>
+                  <ChevronDownIcon className={`w-4 h-4 text-stone-500 transition-transform duration-200 ${userMenuOpen ? "rotate-180" : ""}`} />
+                </button>
 
-            {/* Primary CTA: Subscribe */}
-            <Link
-              to="/auth/register"
-              className="inline-flex items-center gap-1.5 px-4 sm:px-5 py-2 text-sm font-medium text-white bg-stone-900 hover:bg-stone-800 rounded-full transition-all duration-200 shadow-xs hover:shadow-md active:scale-95"
-            >
-              <EnvelopeIcon className="w-4 h-4" />
-              <span>Subscribe</span>
-            </Link>
+                {/* Dropdown Menu */}
+                {userMenuOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-40"
+                      onClick={() => setUserMenuOpen(false)}
+                    />
+                    <div className="absolute right-0 mt-2 w-60 bg-white border border-stone-200 rounded-2xl shadow-xl z-50 py-2 transition-all">
+                      {/* User Header Info */}
+                      <div className="px-4 py-2.5 border-b border-stone-100">
+                        <p className="text-sm font-semibold text-stone-900 truncate">
+                          {session.user.name || "User Account"}
+                        </p>
+                        <p className="text-xs text-stone-500 truncate mt-0.5">
+                          {session.user.email}
+                        </p>
+                      </div>
+
+                      {/* Dropdown Navigation Links */}
+                      <div className="py-1">
+                        <Link
+                          to="/profile"
+                          onClick={() => setUserMenuOpen(false)}
+                          className="flex items-center gap-2.5 px-4 py-2 text-sm text-stone-700 hover:text-stone-900 hover:bg-stone-50 transition-colors"
+                        >
+                          <UserIcon className="w-4 h-4 text-stone-500" />
+                          <span>Profile</span>
+                        </Link>
+                        <Link
+                          to="/saved"
+                          onClick={() => setUserMenuOpen(false)}
+                          className="flex items-center gap-2.5 px-4 py-2 text-sm text-stone-700 hover:text-stone-900 hover:bg-stone-50 transition-colors"
+                        >
+                          <BookmarkIcon className="w-4 h-4 text-stone-500" />
+                          <span>Saved Articles</span>
+                        </Link>
+                        <Link
+                          to="/settings"
+                          onClick={() => setUserMenuOpen(false)}
+                          className="flex items-center gap-2.5 px-4 py-2 text-sm text-stone-700 hover:text-stone-900 hover:bg-stone-50 transition-colors"
+                        >
+                          <Cog6ToothIcon className="w-4 h-4 text-stone-500" />
+                          <span>Settings</span>
+                        </Link>
+                      </div>
+
+                      {/* Sign Out Action */}
+                      <div className="pt-1 border-t border-stone-100">
+                        <button
+                          onClick={handleSignOut}
+                          className="w-full flex items-center gap-2.5 px-4 py-2 text-sm text-red-600 hover:bg-red-50 transition-colors text-left"
+                        >
+                          <ArrowRightEndOnRectangleIcon className="w-4 h-4 text-red-500" />
+                          <span>Sign Out</span>
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            ) : (
+              <>
+                <Link
+                  to="/auth/login"
+                  className="hidden sm:inline-flex items-center px-4 py-2 text-sm font-medium text-stone-900 bg-transparent border border-stone-300 hover:border-stone-900 rounded-full transition-all duration-200 hover:bg-stone-50"
+                >
+                  Sign In
+                </Link>
+
+                <Link
+                  to="/auth/register"
+                  className="inline-flex items-center gap-1.5 px-4 sm:px-5 py-2 text-sm font-medium text-white bg-stone-900 hover:bg-stone-800 rounded-full transition-all duration-200 shadow-xs hover:shadow-md active:scale-95"
+                >
+                  <EnvelopeIcon className="w-4 h-4" />
+                  <span>Subscribe</span>
+                </Link>
+              </>
+            )}
 
             {/* Mobile Hamburger Button */}
             <button
@@ -166,12 +259,27 @@ export function Navbar() {
           </nav>
           
           <div className="pt-3 border-t border-stone-100 flex flex-col gap-2">
-            <Link
-              to="/auth/login"
-              className="w-full text-center py-2.5 text-sm font-medium text-stone-900 bg-stone-100 hover:bg-stone-200 rounded-full transition-colors"
-            >
-              Sign In
-            </Link>
+            {session?.user ? (
+              <>
+                <div className="px-4 py-2 bg-stone-50 rounded-xl">
+                  <p className="text-sm font-medium text-stone-900">{session.user.name}</p>
+                  <p className="text-xs text-stone-500">{session.user.email}</p>
+                </div>
+                <button
+                  onClick={handleSignOut}
+                  className="w-full text-center py-2.5 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-full transition-colors"
+                >
+                  Sign Out
+                </button>
+              </>
+            ) : (
+              <Link
+                to="/auth/login"
+                className="w-full text-center py-2.5 text-sm font-medium text-stone-900 bg-stone-100 hover:bg-stone-200 rounded-full transition-colors"
+              >
+                Sign In
+              </Link>
+            )}
           </div>
         </div>
       )}
