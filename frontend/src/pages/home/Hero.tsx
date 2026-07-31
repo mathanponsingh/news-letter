@@ -1,24 +1,20 @@
 import { useState, useEffect } from "react";
-import { dummyNewsData, type NewsItem } from "../../data/dummyData";
-import { 
-  ChevronLeftIcon, 
-  ChevronRightIcon, 
-  ArrowTopRightOnSquareIcon
-} from "@heroicons/react/24/outline";
+import type { NewsItem } from "../../types";
+import { useNews } from "../../hooks/useNews";
+import { ArrowTopRightOnSquareIcon, ChevronLeftIcon, ChevronRightIcon } from "@heroicons/react/24/outline";
 
-// Fallback high-resolution editorial imagery for items with null image
-const FALLBACK_IMAGES = [
-  "https://images.unsplash.com/photo-1504711434969-e33886168f5c?auto=format&fit=crop&w=1600&q=80",
-  "https://images.unsplash.com/photo-1585829365295-ab7cd400c167?auto=format&fit=crop&w=1600&q=80",
-  "https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=1600&q=80",
-  "https://images.unsplash.com/photo-1526374965328-7f61d4dc18c5?auto=format&fit=crop&w=1600&q=80"
-];
+interface HeroProps {
+  newsData?: NewsItem[];
+}
 
-export function Hero() {
+export function Hero({ newsData: propNewsData }: HeroProps = {}) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);
 
-  const totalItems = dummyNewsData.length;
+  const { newsData: fetchedNews } = useNews('/technology');
+  const newsData = propNewsData ?? fetchedNews;
+
+  const totalItems = (newsData.length > 4) ? 4 : newsData.length;
 
   // Auto-advance carousel every 6 seconds
   useEffect(() => {
@@ -44,10 +40,10 @@ export function Hero() {
       onMouseLeave={() => setIsPaused(false)}
     >
       {/* Slides */}
-      {dummyNewsData.map((item: NewsItem, index: number) => {
+      {newsData.map((item: NewsItem, index: number) => {
         const isActive = index === currentIndex;
-        const itemImage = item.image || FALLBACK_IMAGES[index % FALLBACK_IMAGES.length];
-
+        const itemImage = !item.image ? "/default.jpg" : item.image;
+        if(index >= 4) return;
         return (
           <div
             key={item.id}
@@ -126,7 +122,7 @@ export function Hero() {
 
       {/* Bottom Dot Indicators */}
       <div className="absolute bottom-8 right-8 z-20 flex items-center gap-2.5 bg-black/50 backdrop-blur-md px-4 py-2 rounded-full border border-white/20">
-        {dummyNewsData.map((_, dotIndex: number) => (
+        {newsData.map((_, dotIndex: number) => (
           <button
             key={dotIndex}
             onClick={() => setCurrentIndex(dotIndex)}
