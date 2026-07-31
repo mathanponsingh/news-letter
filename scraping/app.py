@@ -17,29 +17,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def get_google_news_fallback_image(title):
-    """Fetches high-res real news article image thumbnail from Google News search when direct Reuters Cloud IP is blocked by DataDome."""
-    try:
-        import urllib.parse
-        from curl_cffi import requests as cffi_requests
-        q = urllib.parse.quote(f"{title} site:reuters.com")
-        url = f"https://news.google.com/search?q={q}&hl=en-US&gl=US&ceid=US:en"
-        r = cffi_requests.get(url, impersonate="chrome", timeout=5)
-        if r.status_code == 200:
-            soup = BeautifulSoup(r.text, "html.parser")
-            for img in soup.find_all("img"):
-                src = img.get("src") or img.get("srcset") or ""
-                if "googleusercontent.com" in src:
-                    base_url = src.split("=")[0]
-                    return f"{base_url}=s800"
-    except Exception:
-        pass
-
-    import hashlib
-    title_hash = hashlib.md5(title.encode("utf-8")).hexdigest()[:8]
-    return f"https://picsum.photos/seed/{title_hash}/800/450"
-
-
 def extract_rss_image_url(item, link, title):
     """Extracts image URL from RSS XML elements (media, enclosure, description) or fetches real article HTML element images via curl_cffi."""
     # 1. Check XML elements for media/enclosure/description image tags
@@ -69,6 +46,7 @@ def extract_rss_image_url(item, link, title):
         img = soup.find("img")
         if img and img.get("src"):
             return img.get("src")
+
     # 2. Scrape article page directly via curl_cffi for real image
     if link and link.startswith("https://www.reuters.com"):
         try:
@@ -100,8 +78,8 @@ def extract_rss_image_url(item, link, title):
         except Exception:
             pass
 
-    # 3. Real News Image fallback via Google News search (for Cloud IPs / GitHub Actions)
-    return get_google_news_fallback_image(title)
+    # Leave image empty string if no original image is found
+    return ""
 
 
 def fetch_reuters_rss():
@@ -301,9 +279,9 @@ def fetch_reuters_direct():
                 except Exception:
                     pass
 
-            # Guarantee that image_url is NEVER empty string or None by using real news thumbnail search fallback
-            if not image_url or not image_url.strip():
-                image_url = get_google_news_fallback_image(headline)
+            # Leave image_url empty string if no original image is found
+            if not image_url:
+                image_url = ""
 
             print(headline+"\n"+image_url+"\n")
             return {
