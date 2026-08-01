@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { EnvelopeIcon, LockClosedIcon, UserIcon, ArrowRightIcon } from "@heroicons/react/24/outline";
+import { signUp } from "../../lib/auth-client";
 
 export function Register() {
   const [name, setName] = useState("");
@@ -10,13 +11,22 @@ export function Register() {
   const [isLoading, setIsLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setTimeout(() => {
-      setIsLoading(false);
-      navigate("/");
-    }, 800);
+    const {data, error} = await signUp.email({
+          email: email,
+          password: password,
+          name: name
+        })
+        if(error){
+          console.error('login error', error);
+        }
+        if(data){
+          console.log("Login success", data)
+          navigate("/")
+        }
+        setIsLoading(false);
   };
 
   return (
