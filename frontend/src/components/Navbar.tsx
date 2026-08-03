@@ -12,6 +12,7 @@ import {
   ArrowRightEndOnRectangleIcon
 } from "@heroicons/react/24/outline";
 import { useSession, signOut } from "../lib/auth-client";
+import { toast } from "react-toastify";
 
 export function Navbar() {
   const { data: session } = useSession();
@@ -21,6 +22,15 @@ export function Navbar() {
   const [searchQuery, setSearchQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const location = useLocation();
+
+  // Check for OAuth redirect success flag
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("auth") === "success") {
+      toast.success("Signed in successfully!");
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   // Scroll effect for subtle header elevation styling
   useEffect(() => {
@@ -139,8 +149,17 @@ export function Navbar() {
                   className="flex items-center gap-2 p-1 pl-3 pr-2 text-stone-800 hover:text-stone-900 bg-stone-100/90 hover:bg-stone-200/80 border border-stone-200/90 rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-stone-900/20"
                   aria-expanded={userMenuOpen}
                 >
-                  <div className="w-7 h-7 rounded-full bg-stone-900 text-white font-medium text-xs flex items-center justify-center uppercase shadow-xs">
-                    {session.user.name ? session.user.name.charAt(0) : "U"}
+                  <div className="w-7 h-7 rounded-full bg-stone-900 text-white font-medium text-xs flex items-center justify-center uppercase shadow-xs overflow-hidden shrink-0">
+                    {session.user.image ? (
+                      <img
+                        src={session.user.image}
+                        alt={session.user.name || "User profile"}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      session.user.name ? session.user.name.charAt(0) : "U"
+                    )}
                   </div>
                   <span className="text-sm font-medium max-w-[120px] truncate">
                     {session.user.name || "Account"}
@@ -155,15 +174,29 @@ export function Navbar() {
                       className="fixed inset-0 z-40"
                       onClick={() => setUserMenuOpen(false)}
                     />
-                    <div className="absolute right-0 mt-2 w-60 bg-white border border-stone-200 rounded-2xl shadow-xl z-50 py-2 transition-all">
+                    <div className="absolute right-0 mt-2 w-64 bg-white border border-stone-200 rounded-2xl shadow-xl z-50 py-2 transition-all">
                       {/* User Header Info */}
-                      <div className="px-4 py-2.5 border-b border-stone-100">
-                        <p className="text-sm font-semibold text-stone-900 truncate">
-                          {session.user.name || "User Account"}
-                        </p>
-                        <p className="text-xs text-stone-500 truncate mt-0.5">
-                          {session.user.email}
-                        </p>
+                      <div className="px-4 py-3 border-b border-stone-100 flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-stone-900 text-white font-medium text-sm flex items-center justify-center uppercase shadow-xs overflow-hidden shrink-0">
+                          {session.user.image ? (
+                            <img
+                              src={session.user.image}
+                              alt={session.user.name || "User profile"}
+                              className="w-full h-full object-cover"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            session.user.name ? session.user.name.charAt(0) : "U"
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-semibold text-stone-900 truncate">
+                            {session.user.name || "User Account"}
+                          </p>
+                          <p className="text-xs text-stone-500 truncate mt-0.5">
+                            {session.user.email}
+                          </p>
+                        </div>
                       </div>
 
                       {/* Dropdown Navigation Links */}
@@ -261,9 +294,23 @@ export function Navbar() {
           <div className="pt-3 border-t border-stone-100 flex flex-col gap-2">
             {session?.user ? (
               <>
-                <div className="px-4 py-2 bg-stone-50 rounded-xl">
-                  <p className="text-sm font-medium text-stone-900">{session.user.name}</p>
-                  <p className="text-xs text-stone-500">{session.user.email}</p>
+                <div className="px-4 py-3 bg-stone-50 rounded-xl flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-stone-900 text-white font-medium text-sm flex items-center justify-center uppercase shadow-xs overflow-hidden shrink-0">
+                    {session.user.image ? (
+                      <img
+                        src={session.user.image}
+                        alt={session.user.name || "User profile"}
+                        className="w-full h-full object-cover"
+                        referrerPolicy="no-referrer"
+                      />
+                    ) : (
+                      session.user.name ? session.user.name.charAt(0) : "U"
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-stone-900 truncate">{session.user.name}</p>
+                    <p className="text-xs text-stone-500 truncate">{session.user.email}</p>
+                  </div>
                 </div>
                 <button
                   onClick={handleSignOut}
