@@ -59,6 +59,121 @@ def get_random_headers():
     }
 
 
+def clean_image_url(url, base_url="https://www.reuters.com"):
+    """Validates and formats image URLs, discarding data URIs and invalid strings."""
+    if not url or not isinstance(url, str):
+        return ""
+    url = url.strip()
+    if url.startswith("data:"):
+        return ""
+    if url.startswith("//"):
+        return f"https:{url}"
+    if url.startswith("/"):
+        return f"{base_url.rstrip('/')}{url}"
+    if url.startswith("http://") or url.startswith("https://"):
+        return url
+    return ""
+
+
+def extract_card_image(card):
+    """Extracts a valid http(s) image URL from a story card element, properly parsing lazy-loading & picture elements."""
+    possible_urls = []
+
+    # 1. Check parent or nested <picture> element sources first
+    picture = card if card.name == "picture" else card.find("picture")
+    if picture:
+        for source in picture.find_all("source"):
+            for attr in ["srcset", "data-srcset", "src"]:
+                val = source.get(attr)
+                if val:
+                    candidates = [item.strip().split(" ")[0] for item in val.split(",") if item.strip()]
+                    possible_urls.extend(reversed(candidates))
+
+    # 2. Check <img> elements in card
+    imgs = card.find_all("img") if card.name != "img" else [card]
+    for img in imgs:
+        for attr in ["srcset", "data-srcset"]:
+            val = img.get(attr)
+            if val:
+                candidates = [item.strip().split(" ")[0] for item in val.split(",") if item.strip()]
+                possible_urls.extend(reversed(candidates))
+
+        for attr in ["src", "data-src", "data-lazy-src", "data-original"]:
+            val = img.get(attr)
+            if val:
+                possible_urls.append(val)
+
+    # Return the first clean http(s) URL found
+    for candidate in possible_urls:
+        cleaned = clean_image_url(candidate)
+        if cleaned:
+            return cleaned
+
+    return ""
+
+
+def extract_article_page_image(soup):
+    """Extracts og:image, twitter:image, ld+json image, or main eager image from article page HTML."""
+    if not soup:
+        return ""
+
+    # 1. Check meta tags
+    meta_attrs = [
+        {"property": "og:image"},
+        {"name": "og:image"},
+        {"name": "twitter:image"},
+        {"property": "twitter:image"},
+        {"name": "image"},
+        {"rel": "image_src"},
+    ]
+    for attrs in meta_attrs:
+        tag = soup.find("meta", attrs=attrs) or soup.find("link", attrs=attrs)
+        if tag:
+            content = tag.get("content") or tag.get("href")
+            cleaned = clean_image_url(content)
+            if cleaned:
+                return cleaned
+
+    # 2. Check JSON-LD structured data
+    import json
+    for script in soup.find_all("script", type="application/ld+json"):
+        try:
+            data = json.loads(script.string or "")
+            if isinstance(data, dict):
+                img = data.get("image") or data.get("thumbnailUrl")
+                if isinstance(img, dict):
+                    img = img.get("url")
+                if isinstance(img, list) and img:
+                    img = img[0]
+                cleaned = clean_image_url(img)
+                if cleaned:
+                    return cleaned
+        except Exception:
+            pass
+
+    # 3. Check eager or main images in article body
+    img_tag = (
+        soup.find("img", {"data-testid": "EagerImage"}) or
+        soup.find("img", attrs={"srcset": True}) or
+        soup.find("img", attrs={"src": True})
+    )
+    if img_tag:
+        for attr in ["srcset", "data-srcset"]:
+            val = img_tag.get(attr)
+            if val:
+                candidates = [item.strip().split(" ")[0] for item in val.split(",") if item.strip()]
+                if candidates:
+                    cleaned = clean_image_url(candidates[-1])
+                    if cleaned:
+                        return cleaned
+        for attr in ["src", "data-src", "data-lazy-src"]:
+            cleaned = clean_image_url(img_tag.get(attr))
+            if cleaned:
+                return cleaned
+
+    return ""
+
+
 def extract_rss_image_url(item, link, title):
     """Extracts image URL from RSS XML elements (media, enclosure, description) or fetches real article HTML element images via curl_cffi."""
     # 1. Check XML elements for media/enclosure/description image tags
@@ -74,7 +189,9 @@ def extract_rss_image_url(item, link, title):
             url = elem.attrib.get("url")
             elem_type = elem.attrib.get("type", "").lower()
             if not elem_type or "image" in elem_type or any(url.lower().endswith(ext) for ext in [".jpg", ".jpeg", ".png", ".webp", ".gif"]):
-                return url
+                cleaned = clean_image_url(url)
+                if cleaned:
+                    return cleaned
 
     # Check description or content HTML for <img> tag
     desc = item.find("description")
@@ -86,13 +203,21 @@ def extract_rss_image_url(item, link, title):
     if desc_text:
         soup = BeautifulSoup(desc_text, "html.parser")
         img = soup.find("img")
-        if img and img.get("src"):
-            return img.get("src")
+        if img:
+            for attr in ["src", "data-src", "srcset"]:
+                val = img.get(attr)
+                if val:
+                    candidates = [item.strip().split(" ")[0] for item in val.split(",") if item.strip()]
+                    for candidate in candidates:
+                        cleaned = clean_image_url(candidate)
+                        if cleaned:
+                            return cleaned
 
     # 2. Scrape article page directly via curl_cffi for real image
     if link and link.startswith("https://www.reuters.com"):
         try:
             from curl_cffi import requests as cffi_requests
+            time.sleep(random.uniform(0.5, 1.5))
             r = cffi_requests.get(
                 link,
                 impersonate=get_random_impersonate(),
@@ -101,27 +226,9 @@ def extract_rss_image_url(item, link, title):
             )
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, "html.parser")
-                meta_img = (
-                    soup.find("meta", property="og:image") or
-                    soup.find("meta", name="twitter:image") or
-                    soup.find("meta", attrs={"name": "og:image"})
-                )
-                if meta_img and meta_img.get("content"):
-                    return meta_img.get("content")
-
-                img_tag = (
-                    soup.find("img", {"data-testid": "EagerImage"}) or
-                    soup.find("img", src=True) or
-                    soup.find("img", srcset=True)
-                )
-                if img_tag:
-                    src_url = img_tag.get("src")
-                    if not src_url and img_tag.get("srcset"):
-                        candidates = [item.strip().split(" ")[0] for item in img_tag["srcset"].split(",") if item.strip()]
-                        if candidates:
-                            src_url = candidates[-1]
-                    if src_url:
-                        return src_url
+                cleaned = extract_article_page_image(soup)
+                if cleaned:
+                    return cleaned
         except Exception:
             pass
 
@@ -301,24 +408,13 @@ def fetch_reuters_direct():
             desc_tag = card.find("p", attrs={"data-testid": "Description"}) or card.find("p")
             description = desc_tag.text.strip() if desc_tag else "None"
 
-            img_tag = (
-                card.find("img", {"data-testid": "EagerImage"}) or
-                card.find("img", src=True) or
-                card.find("img", srcset=True) or
-                card.find("img")
-            )
-            image_url = None
-            if img_tag:
-                image_url = img_tag.get("src")
-                if not image_url and img_tag.get("srcset"):
-                    candidates = [item.strip().split(" ")[0] for item in img_tag["srcset"].split(",") if item.strip()]
-                    if candidates:
-                        image_url = candidates[-1]
+            # Extract clean HTTP(S) image URL from card (handles srcset, data-src, picture elements)
+            image_url = extract_card_image(card)
 
-            # If image URL missing on index page, fetch from article page og:image
-            if (not image_url or not image_url.strip()) and link and link.startswith("https://www.reuters.com"):
+            # If image URL missing or invalid on index page, fetch from article page
+            if not image_url and link and link.startswith("https://www.reuters.com"):
                 try:
-                    time.sleep(random.uniform(1.5, 4.0))
+                    time.sleep(random.uniform(1.0, 2.5))
 
                     art_resp = cffi_requests.get(
                         link,
@@ -328,17 +424,10 @@ def fetch_reuters_direct():
                     )
                     if art_resp.status_code == 200:
                         art_soup = BeautifulSoup(art_resp.text, "html.parser")
-                        meta_img = (
-                            art_soup.find("meta", property="og:image") or
-                            art_soup.find("meta", name="twitter:image") or
-                            art_soup.find("meta", attrs={"name": "og:image"})
-                        )
-                        if meta_img and meta_img.get("content"):
-                            image_url = meta_img.get("content")
+                        image_url = extract_article_page_image(art_soup)
                 except Exception:
                     pass
 
-            # Leave image_url empty string if no original image is found
             if not image_url:
                 image_url = ""
 
