@@ -14,7 +14,49 @@ from selenium.webdriver.support import expected_conditions as EC
 from webdriver_manager.chrome import ChromeDriverManager
 from webdriver_manager.core.os_manager import ChromeType
 from dotenv import load_dotenv
+import random
 load_dotenv()
+
+# User-Agent pool for rotation across requests
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Edg/126.0.0.0",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36",
+]
+
+IMPERSONATE_TARGETS = [
+    "chrome",
+    "chrome120",
+    "chrome119",
+    "safari",
+    "edge",
+]
+
+
+def get_random_user_agent():
+    """Returns a random User-Agent string from the pool."""
+    return random.choice(USER_AGENTS)
+
+
+def get_random_impersonate():
+    """Returns a random browser impersonation target for curl_cffi."""
+    return random.choice(IMPERSONATE_TARGETS)
+
+
+def get_random_headers():
+    """Generates realistic HTTP request headers with a rotated User-Agent."""
+    return {
+        "User-Agent": get_random_user_agent(),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": "none",
+        "Upgrade-Insecure-Requests": "1",
+    }
 
 
 def extract_rss_image_url(item, link, title):
@@ -51,7 +93,12 @@ def extract_rss_image_url(item, link, title):
     if link and link.startswith("https://www.reuters.com"):
         try:
             from curl_cffi import requests as cffi_requests
-            r = cffi_requests.get(link, impersonate="chrome", timeout=10)
+            r = cffi_requests.get(
+                link,
+                impersonate=get_random_impersonate(),
+                headers=get_random_headers(),
+                timeout=10
+            )
             if r.status_code == 200:
                 soup = BeautifulSoup(r.text, "html.parser")
                 meta_img = (
@@ -94,7 +141,7 @@ def fetch_reuters_rss():
         new_decoderv1 = None
 
     url = "https://news.google.com/rss/search?q=site:reuters.com+technology&hl=en-US&gl=US&ceid=US:en"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+    headers = get_random_headers()
 
     cutoff_time = datetime.now(timezone.utc) - timedelta(days=1)
 
@@ -207,7 +254,12 @@ def fetch_reuters_direct():
         from concurrent.futures import ThreadPoolExecutor
         
         url = "https://www.reuters.com/technology/"
-        r = cffi_requests.get(url, impersonate="chrome", timeout=10)
+        r = cffi_requests.get(
+            url,
+            impersonate=get_random_impersonate(),
+            headers=get_random_headers(),
+            timeout=10
+        )
         if r.status_code != 200 or len(r.text) < 5000:
             return []
 
@@ -266,7 +318,14 @@ def fetch_reuters_direct():
             # If image URL missing on index page, fetch from article page og:image
             if (not image_url or not image_url.strip()) and link and link.startswith("https://www.reuters.com"):
                 try:
-                    art_resp = cffi_requests.get(link, impersonate="chrome", timeout=10)
+                    time.sleep(random.uniform(1.5, 4.0))
+
+                    art_resp = cffi_requests.get(
+                        link,
+                        impersonate=get_random_impersonate(),
+                        headers=get_random_headers(),
+                        timeout=10
+                    )
                     if art_resp.status_code == 200:
                         art_soup = BeautifulSoup(art_resp.text, "html.parser")
                         meta_img = (
@@ -294,7 +353,7 @@ def fetch_reuters_direct():
                 "createdAt": datetime.now(timezone.utc)
             }
 
-        with ThreadPoolExecutor(max_workers=10) as executor:
+        with ThreadPoolExecutor(max_workers=2) as executor:
             raw_articles = [r for r in executor.map(process_card, story_cards) if r is not None]
 
         # Filter out duplicate headlines/links from main page layout
